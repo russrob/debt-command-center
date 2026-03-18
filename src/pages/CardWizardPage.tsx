@@ -183,8 +183,9 @@ export const CardWizardPage: React.FC<{
   const removePromo = (id: string) => setCard(p => ({ ...p, promoList: p.promoList.filter(pr => pr.id !== id) }));
 
   const canNext = () => {
-    if (step === 1) return card.bank.trim().length > 0 && card.name.trim().length > 0 && card.lastFour.length === 4;
-    if (step === 2 && isBNPL) return bnplTotal > 0;
+    if (step === 1 && isBNPL) return card.name.trim().length > 0; // BNPL: only name required
+    if (step === 1 && !isBNPL) return card.bank.trim().length > 0 && card.name.trim().length > 0 && card.lastFour.length === 4;
+    if (step === 2 && isBNPL) return bnplTotal > 0 && balanceNum >= 0;
     if (step === 2 && !isBNPL) return balanceNum >= 0;
     if (step === 3 && !isBNPL) return parseFloat(card.apr) >= 0 && parseInt(card.dueDate) >= 1;
     return true;
@@ -195,25 +196,36 @@ export const CardWizardPage: React.FC<{
     const usedColors = new Set(state.cards.map(c => c.color));
     const color   = card.color || COLORS.find(c => !usedColors.has(c)) || COLORS[0];
 
-    // For BNPL: balance = remaining amount owed
+    // For BNPL: balance = remaining amount owed (entered directly in step 2)
+    // If user didn't enter remaining balance, fall back to total purchase amount
     const finalBalance = isBNPL
-      ? balanceNum || (bnplTotal - bnplInstAmt) // fallback: total minus first payment
+      ? (balanceNum > 0 ? balanceNum : bnplTotal)
       : balanceNum;
+
+    // Auto-fill bank from platform if not entered
+    const finalBank = isBNPL
+      ? (card.bank.trim() || card.bnplPlatform)
+      : card.bank.trim();
+
+    // Auto-fill lastFour for BNPL if not entered
+    const finalLastFour = isBNPL
+      ? (card.lastFour || '0000')
+      : card.lastFour;
 
     const newCard: Card = {
       id: newId,
-      bank: card.bank.trim(),
+      bank: finalBank,
       name: card.name.trim(),
-      lastFour: card.lastFour,
+      lastFour: finalLastFour,
       network: isBNPL ? CardNetwork.OTHER : card.network,
       accountType: card.accountType,
       color: isBNPL ? bnplMeta.color : color,
       balance: finalBalance,
-      limit: isBNPL ? bnplTotal : limitNum,  // BNPL: limit = purchase total
+      limit: isBNPL ? bnplTotal : limitNum,
       apr: isBNPL ? (bnplMeta.zeroInterest ? 0 : parseFloat(card.apr) || 0) : (parseFloat(card.apr) || 0),
-      minPayment: isBNPL ? bnplInstAmt : (parseFloat(card.minPayment) || estimatedMin),
+      minPayment: isBNPL ? (bnplInstAmt || autoInstallment) : (parseFloat(card.minPayment) || estimatedMin),
       dueDate: isBNPL
-        ? (card.bnplNextPaymentDate ? new Date(card.bnplNextPaymentDate).getDate() : 1)
+        ? (card.bnplNextPaymentDate ? new Date(card.bnplNextPaymentDate + 'T00:00:00').getDate() : 1)
         : (parseInt(card.dueDate) || 15),
       promos: [],
       reminderEnabled: card.reminderEnabled,
@@ -223,8 +235,8 @@ export const CardWizardPage: React.FC<{
       ...(isBNPL && {
         bnplPlatform: card.bnplPlatform,
         bnplTotalPurchase: bnplTotal,
-        bnplInstallmentCount: bnplCount,
-        bnplInstallmentAmount: bnplInstAmt || autoInstallment,
+        bnplInstallmentCount: bnplCount || BNPL_META[card.bnplPlatform].defaultCount,
+        bnplInstallmentAmount: bnplInstAmt > 0 ? bnplInstAmt : autoInstallment,
         bnplInstallmentFrequency: card.bnplInstallmentFrequency,
         bnplNextPaymentDate: card.bnplNextPaymentDate || undefined,
         bnplPurchaseDate: card.bnplPurchaseDate || undefined,
